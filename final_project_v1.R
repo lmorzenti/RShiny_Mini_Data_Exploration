@@ -1,4 +1,5 @@
-#v1 of the final_project
+#April 14th
+#Goal: build the skeleton of the App
   
 
 # Welcome to R Shiny. All that glitters is not gold.
@@ -9,46 +10,44 @@ library(colourpicker) # you might need to install this
 
 # Define UI for application that draws a volcano plot
 ui <- fluidPage(
-  titlePanel("Assignment 7 - Volcano plot!"),
+  titlePanel("Mini Exploration of Given Gene Dataset"),
   sidebarLayout(
     sidebarPanel(
-      fileInput("file", "Load in results",  accept = ".csv"),
-      p("This website is for visualizing the expression results from the given dataset, deseq_res.csv"),
-      radioButtons("x_axis", "Choose column for x-axis", choices = c("baseMean", "log2FoldChange",
-                                                          "lfcSE", "stat", "pvalue", "padj"),
-                                                         selected = "log2FoldChange"),
-      radioButtons("y_axis", "Choose column for y-axis", choices = c("baseMean", "log2FoldChange",
-                                                          "lfcSE", "stat", "pvalue", "padj"),
-                                                         selected = "padj"),
-      colourInput("base", "Base point color", value = "#FEE0E9"),
-      colourInput("highlight", "Highlight point color", value = "#C7DD9D"),
-      sliderInput("slider", "P-adj threshold", min = -300, max = -1, value = -100),
-      submitButton("Run Analysis", icon = icon("star"))
+      fileInput("file", "Load in results",  accept = c(".csv", ".tsv")),
+      p("This application accepts csv and tsv files that are organized in the following manner:
+        a, b, c, d, e, f.")
     ),
     mainPanel(
       tabsetPanel(
-        tabPanel("Plot", plotOutput("volcano")),
-        tabPanel("Table", tableOutput("table"))
+        tabPanel("Samples", 
+                 tabsetPanel(
+                   tabPanel("Table", "Table that holds the information in a readable manner"),
+                   tabPanel("Plots", "Choose to see data through a histogram, density plot, or violin plot")
+                 )),
+        tabPanel("Counts", 
+                 tabsetPanel(
+                   tabPanel("Table", "Table that holds the information in a readable manner"),
+                   tabPanel("Diagnostic Scatter Plot", "diagnostic scatter plots"),
+                   tabPanel("Clustered Heatmap", "counts remaining after filtering"),
+                   tabPanel("PCA Scatter Plot", "pca projections")
+                 )),
+        tabPanel("Differential Expression", 
+                 tabsetPanel(
+                   tabPanel("Table", "Table that holds the information in a readable manner"),
+                   tabPanel("Volcano Plot", "Visualize Expression Significance")
+                 )),
       )
     )
   )
 )
 
-# Define server logic required to draw a volcano plot
+
 server <- function(input, output, session) {
-    
-    #' load_Data
-    #'
-    #' @details Okay this one is a little weird but bear with me here. This is 
-    #' still a "function", but it will take no arguments. The `reactive({})` bit 
-    #' says "if any of my inputs (as in, input$...) are changed, run me again". 
-    #' This is useful when a user clicks a new button or loads a new file. In 
-    #' our case, look for the uploaded file's datapath argument and load it with 
-    #' read.csv. Return this data frame in the normal return() style.
+
+  
     load_data <- reactive({
-      # input$file is a data frame with columns: name, size, type, datapath
-      # You need the 'datapath' column
-      req(input$file) # "req" stops execution if no file uploaded yet
+      
+      req(input$file) 
       df <- read.csv(input$file$datapath)
         return(df)
     })
@@ -128,5 +127,4 @@ server <- function(input, output, session) {
     }) 
 }
 
-# Run the application
 shinyApp(ui = ui, server = server)
