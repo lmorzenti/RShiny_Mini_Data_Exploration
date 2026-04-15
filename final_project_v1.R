@@ -1,40 +1,36 @@
-#April 14th
-#Goal: build the skeleton of the App
-  
-
-# Welcome to R Shiny. All that glitters is not gold.
+# All libraries
 library(shiny)
 library(bslib)
 library(ggplot2)
-library(colourpicker) # you might need to install this
+library(colourpicker)
 
-# Define UI for application that draws a volcano plot
+# Define UI
 ui <- fluidPage(
   titlePanel("Mini Exploration of Given Gene Dataset"),
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Load in results",  accept = c(".csv", ".tsv")),
       p("This application accepts csv and tsv files that are organized in the following manner:
-        a, b, c, d, e, f.")
+        a, b, c, d, e, f.") #Fix this, make sure that it will give a warning for crappy data input
     ),
     mainPanel(
       tabsetPanel(
         tabPanel("Samples", 
                  tabsetPanel(
-                   tabPanel("Table", "Table that holds the information in a readable manner"),
-                   tabPanel("Plots", "Choose to see data through a histogram, density plot, or violin plot")
+                   tabPanel("Table", plotTable("samples_table")),
+                   tabPanel("Plots", plotOutput("samples_plot"))
                  )),
         tabPanel("Counts", 
                  tabsetPanel(
-                   tabPanel("Table", "Table that holds the information in a readable manner"),
-                   tabPanel("Diagnostic Scatter Plot", "diagnostic scatter plots"),
-                   tabPanel("Clustered Heatmap", "counts remaining after filtering"),
-                   tabPanel("PCA Scatter Plot", "pca projections")
+                   tabPanel("Table", plotTable("counts_table")),
+                   tabPanel("Diagnostic Scatter Plot", plotOutput("diagnostic_scatter_plot")),
+                   tabPanel("Clustered Heatmap", plotOutput("heatmap_plot")),
+                   tabPanel("PCA Scatter Plot", plotOutput("pca_plot"))
                  )),
         tabPanel("Differential Expression", 
                  tabsetPanel(
-                   tabPanel("Table", "Table that holds the information in a readable manner"),
-                   tabPanel("Volcano Plot", "Visualize Expression Significance")
+                   tabPanel("Table", plotTable("differential_express_table")),
+                   tabPanel("Volcano Plot", plotOutput("volcano_plot"))
                  )),
       )
     )
@@ -42,11 +38,12 @@ ui <- fluidPage(
 )
 
 
+# This is where I should put all of my functions
 server <- function(input, output, session) {
-
   
+   #' This is to deal with loading in the data from the input box
+   #' Please 
     load_data <- reactive({
-      
       req(input$file) 
       df <- read.csv(input$file$datapath)
         return(df)
@@ -114,17 +111,45 @@ server <- function(input, output, session) {
         return(filtered)
     }
     
-    #' These outputs aren't really functions, so they don't get a full skeleton, 
-    #' but use the renderPlot() and renderTabel() functions to return() a plot 
-    #' or table object, and those will be displayed in your application.
-    output$volcano <- renderPlot({
+
+
+    
+    #' This area will be where you can connect your above functions to the interface to display them
+    #' Sample table
+    output$samples_table <- renderTable({
+    })
+    
+    #' Sample plot
+    output$samples_plot <- renderPlot({
+    })
+    
+    #' Counts table
+    output$counts_table <- renderTable({
+    })
+    
+    #' Counts Diagnostic scatter plot
+    output$diagnostic_scatter_plot <- renderPlot({
+    })
+    
+    #' Counts heatmap
+    output$heatmap_plot <- renderPlot({
+    })
+    
+    #' Counts PCA scatter plot
+    output$pca_plot <- renderPlot({
+    })
+
+    #' Diff. Expression table
+    output$differential_express_table <- renderTable({
+      draw_table(load_data(), input$slider)
+    }) 
+
+    #' Diff. Expression volcano plot
+    output$volcano_plot <- renderPlot({
       volcano_plot(load_data(), input$x_axis, input$y_axis, input$slider, input$base, input$highlight)
     })
     
-    # Same here, just return the table as you want to see it in the web page
-    output$table <- renderTable({
-      draw_table(load_data(), input$slider)
-    }) 
 }
 
+# This line is what will actually launch the app
 shinyApp(ui = ui, server = server)
