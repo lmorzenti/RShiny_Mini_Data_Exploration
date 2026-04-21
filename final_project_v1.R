@@ -10,8 +10,7 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Load in results",  accept = c(".csv", ".tsv")),
-      p("This application accepts csv and tsv files that are organized in the following manner:
-        a, b, c, d, e, f.") #Fix this, make sure that it will give a warning for crappy data input
+      p("This application only accepts csv and tsv files") 
     ),
     mainPanel(
       tabsetPanel(
@@ -38,15 +37,52 @@ ui <- fluidPage(
 )
 
 
-# This is where I should put all of my functions
 server <- function(input, output, session) {
   
-   #' This is to deal with loading in the data from the input box
-   #' Please 
+  # --- Loading in Data -------------------------------------------
     load_data <- reactive({
       req(input$file) 
-      df <- read.csv(input$file$datapath)
+      
+      #first, check the file type
+      ext <- tools::file_ext(input$file$name)
+      validate(
+        need(ext %in% c("csv", "tsv"), "Please upload a .csv or .tsv file.")
+      )
+      #next, read the file
+      df <- tryCatch({
+        if (ext == "csv") read.csv(input$file$datapath)
+        else              read.delim(input$file$datapath)
+      }, error = function(e) NULL)
+      
+      #ensure that the file is well formatted
+      validate(
+        need(!is.null(df), "Dataframe is missing"),
+        need(nrow(df) > 0, "The uploaded file is empty."),
+        need(ncol(df) > 1, "The file has only one column, check delimiter?")
+      )
         return(df)
+    })
+    
+  # --- Tab 1: Samples --------------------------------------------
+    samples_table <- reactive({
+      output$summary_table <- renderTable({
+        df <- load_data()   
+        
+        # build the summary per column
+        do.call(rbind, lapply(names(df), function(col) {
+          x <- df[[col]]
+          data.frame(
+            `Column Name` = col,
+            `Type`        = class(x),
+            `Summary`     = if (is.numeric(x))
+              sprintf("%.1f (+/- %.1f)", mean(x, na.rm=TRUE), sd(x, na.rm=TRUE))
+            else
+              paste(unique(x), collapse = ", "),
+            check.names = FALSE
+          )
+        }))
+      })
+      
     })
     
     #' Volcano plot
@@ -114,35 +150,36 @@ server <- function(input, output, session) {
 
 
     
-    #' This area will be where you can connect your above functions to the interface to display them
+    #' This area will be where the above functions connect to the interfac
     #' Sample table
-    output$samples_table <- renderTable({
-    })
+    #output$samples_table <- renderTable({
+     # samples_table(load_data())
+    #})
     
     #' Sample plot
-    output$samples_plot <- renderPlot({
-    })
+    #output$samples_plot <- renderPlot({
+   # })
     
     #' Counts table
-    output$counts_table <- renderTable({
-    })
+   # output$counts_table <- renderTable({
+    #})
     
     #' Counts Diagnostic scatter plot
-    output$diagnostic_scatter_plot <- renderPlot({
-    })
+   # output$diagnostic_scatter_plot <- renderPlot({
+   # })
     
     #' Counts heatmap
-    output$heatmap_plot <- renderPlot({
-    })
+    #output$heatmap_plot <- renderPlot({
+    #})
     
     #' Counts PCA scatter plot
-    output$pca_plot <- renderPlot({
-    })
+    #output$pca_plot <- renderPlot({
+   # })
 
     #' Diff. Expression table
-    output$differential_express_table <- renderTable({
-      draw_table(load_data(), input$slider)
-    }) 
+    #output$differential_express_table <- renderTable({
+     # draw_table(load_data(), input$slider)
+   # }) 
 
     #' Diff. Expression volcano plot
     output$volcano_plot <- renderPlot({
