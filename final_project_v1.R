@@ -16,19 +16,19 @@ ui <- fluidPage(
       tabsetPanel(
         tabPanel("Samples", 
                  tabsetPanel(
-                   tabPanel("Table", plotTable("samples_table")),
+                   tabPanel("Table", tableOutput("samples_table")),
                    tabPanel("Plots", plotOutput("samples_plot"))
                  )),
         tabPanel("Counts", 
                  tabsetPanel(
-                   tabPanel("Table", plotTable("counts_table")),
+                   tabPanel("Table", tableOutput("counts_table")),
                    tabPanel("Diagnostic Scatter Plot", plotOutput("diagnostic_scatter_plot")),
                    tabPanel("Clustered Heatmap", plotOutput("heatmap_plot")),
                    tabPanel("PCA Scatter Plot", plotOutput("pca_plot"))
                  )),
         tabPanel("Differential Expression", 
                  tabsetPanel(
-                   tabPanel("Table", plotTable("differential_express_table")),
+                   tabPanel("Table", tableOutput("differential_express_table")),
                    tabPanel("Volcano Plot", plotOutput("volcano_plot"))
                  )),
       )
