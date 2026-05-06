@@ -50,7 +50,6 @@ df <- iris
 install.packages("DT")
 library(DT)
 
-
 make_data_table <- function(df) {
   display <- DT::datatable(df)
   return(display)
