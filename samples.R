@@ -3,30 +3,14 @@ library(bslib)
 library(dyplr)
 library(ggplot2)
 library(colourpicker)
+library(DT)
+library(GEOquery)
+
+install.packages("DT")
+BiocManager::install("GEOquery")
+df <- iris # for testing
 
 # Summary Function
-
-# Part 1 - This is to make the summary table 
-#samples_table <- reactive({
- # output$summary_table <- renderTable({
-   # df <- load_data()   
-    
-    # build the summary per column
-  #  do.call(rbind, lapply(names(df), function(col) {
-   #   x <- df[[col]]
-   #   data.frame(
-  #      `Column Name` = col,
-  #      `Type`        = class(x),
-   #     `Mean(sd) or Distinct Values`     = if (is.numeric(x))
-   #       sprintf("%.1f (+/- %.1f)", mean(x, na.rm=TRUE), sd(x, na.rm=TRUE))
-   #     else
-   #       paste(unique(x), collapse = ", "),
-   #     check.names = FALSE
-   #   )
- #   }))
- # })
-  
-#})
 
 # part 1 - This is to make the summary tables
 make_summary_table <- function(df) {
@@ -44,11 +28,7 @@ make_summary_table <- function(df) {
   }))
 }
 
-df <- iris
-
 # part 2 - the interactive statistics table 
-install.packages("DT")
-library(DT)
 
 make_data_table <- function(df) {
   display <- DT::datatable(df)
@@ -66,12 +46,6 @@ head(df)
 colnames(df)
 dim(df)
 
-colnames(df)
-
-
-# install if neededx
-BiocManager::install("GEOquery")
-library(GEOquery)
 
 gse <- getGEO("GSE64810")
 metadata <- pData(gse[[1]])
@@ -114,10 +88,10 @@ summary(clean_metadata$age_of_death)
 
 
 # try this on your real data to see what you're aiming for
-library(ggplot2)
 
 make_sample_plot <- function(df, col_name, group_by) {
   ggplot(df, aes(x = .data[[col_name]], fill = .data[[group_by]])) +
+    theme_classic() + 
     geom_density(alpha = 0.5)
 }
 

@@ -57,8 +57,8 @@ plot_individual_geneexpression <- function(gene_data, plot_type) {
   return(p)
 }
 
+#tests
 plot_individual_geneexpression(gene_data, "boxplot")
 plot_individual_geneexpression(gene_data, "violinplot")
 plot_individual_geneexpression(gene_data, "barplot")
 plot_individual_geneexpression(gene_data, "beeswarm")
-

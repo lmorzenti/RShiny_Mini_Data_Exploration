@@ -126,6 +126,7 @@ make_heatmap <- function(filtered, log_transform) {
   return(p)
 }
 
+#test
 make_heatmap(filtered, TRUE)
 
 #part 4 - tab with a scatter plot of PCA projections
