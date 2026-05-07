@@ -7,8 +7,10 @@ library(dplyr)
 library(tidyr)
 library(ggbeeswarm)
 library(DT)
-library(GEOquery)
 library(pheatmap)
+
+# add this at the very top of your app, before ui
+options(shiny.maxRequestSize = 100 * 1024^2)  # 100MB limit
 
 # Define UI
 ui <- fluidPage(
@@ -38,7 +40,8 @@ ui <- fluidPage(
       tabsetPanel(
         tabPanel("Samples", 
                  tabsetPanel(
-                   tabPanel("Table", tableOutput("samples_table")),
+                   tabPanel("Summary", tableOutput("samples_table")),
+                   tabPanel("Stats",  DT::dataTableOutput("stats_table")),
                    tabPanel("Plots", plotOutput("samples_plot"))
                  )),
         tabPanel("Counts", 
@@ -56,27 +59,27 @@ ui <- fluidPage(
         tabPanel("Individual Gene Expression", 
                  tabsetPanel(
                    tabPanel("Plot", plotOutput("individual_gene_plot"))
-                 )),
-      ))))
+                 ))
+      ),verbatimTextOutput("debug"))))
 
 
 server <- function(input, output, session) {
 
   # load in and save data  - 
   metadata <- reactive({
-    req(metadata_file$file)
-    df <- read.delim(input$metadata_file$datapath, check.names=FALSE)
+    req(input$metadata_file)
+    df <- read.csv(input$metadata_file$datapath, check.names=FALSE)
     return(df)
   })
   
   counts <- reactive({
-    req(counts_file$file)
-    df <- read.delim(input$counts_file$datapath, check.names=FALSE)
+    req(input$counts_file)
+    df <- read.csv(input$counts_file$datapath, check.names=FALSE)
     return(df)
   })
   
   de_results <- reactive({
-    req(DiffExp_file$file)
+    req(input$DiffExp_file)
     df <- read.delim(input$DiffExp_file$datapath, check.names=FALSE)
     return(df)
   })
@@ -84,18 +87,22 @@ server <- function(input, output, session) {
   # --- Tab 1: Samples --------------------------------------------
 
     # build summary table
-    make_summary_table <- function(df) {
-      do.call(rbind, lapply(names(df), function(col) {
-        x <- df[[col]]
-        data.frame(
-          `Column Name` = col,
-          `Type` = class(x),
-          `Mean(sd) or Distinct Values` = if (is.numeric(x))
-            sprintf("%.1f (+/- %.1f)", mean(x, na.rm=TRUE), sd(x, na.rm=TRUE))
-          else
-            paste(unique(x), collapse = ", "),
-          check.names = FALSE
-        )}))}
+  make_summary_table <- function(df) {
+    do.call(rbind, lapply(names(df), function(col) {
+      x <- df[[col]]
+      data.frame(
+        `Column Name` = col,
+        `Type` = class(x),
+        `Mean(sd) or Distinct Values` = if (is.numeric(x))
+          sprintf("%.1f (+/- %.1f)", mean(x, na.rm=TRUE), sd(x, na.rm=TRUE))
+        else if (length(unique(x)) > 10)
+          sprintf("%d unique values", length(unique(x)))  # too many to list
+        else
+          paste(unique(x), collapse = ", "),  # few enough to list
+        check.names = FALSE
+      )
+    }))
+  }
     
     # build interactive summary table 
     make_data_table <- function(df) {
@@ -112,6 +119,12 @@ server <- function(input, output, session) {
     }
     
     # --- Tab 2: Counts --------------------------------------------
+    
+    counts_only <- reactive({
+      req(input$counts_file)
+      counts()[, -1]
+    })
+    
     # filter and Summarize effect of filtering
     filter_by_variance <- function(counts_only, percentile) {
       gene_variances <- apply(counts_only, 1, var)
@@ -135,37 +148,42 @@ server <- function(input, output, session) {
     }
     
     filtered_counts <- reactive({
-      filter_counts(
-        counts(),
-        input$variance_percentile,
-        input$min_nonzero
-      )})
+      filter_counts(counts_only(),input$variance_percentile,input$min_nonzero)
+      })
     
     filtered_sum_table <- function(counts_only, filtered) {
       table <- data.frame(
-        `Number of Samples` = ncol(counts_only),
-        `Total Number of Genes` = nrow(counts_only),
-        `Number of genes passing filter` = nrow(filtered),
-        `Percent of genes passing filter` = (nrow(filtered)/nrow(counts_only))*100,
-        `Number of genes not passing the filter` = nrow(counts_only) - nrow(filtered),
-        `Percent of genes not passing the filter` = ((nrow(counts_only) - nrow(filtered))/nrow(counts_only))*100
+        Metric = c(
+          "Number of Samples",
+          "Total Number of Genes", 
+          "Number of genes passing filter",
+          "Percent of genes passing filter",
+          "Number of genes not passing filter",
+          "Percent of genes not passing filter"
+        ),
+        Value = c(
+          ncol(counts_only),
+          nrow(counts_only),
+          nrow(filtered),
+          round((nrow(filtered)/nrow(counts_only))*100, 2),
+          nrow(counts_only) - nrow(filtered),
+          round(((nrow(counts_only) - nrow(filtered))/nrow(counts_only))*100, 2)
+        )
       )
       return(table)
     }
     
     # scatter plot tab
     gene_stats <- reactive({
-      counts_only <- counts()
-      filtered <- filtered_counts()
       data.frame(
-        median = apply(counts_only, 1, median),
-        variance = apply(counts_only, 1, var),
-        num_zeros = apply(counts_only, 1, function(x) sum(x>0)),
-        passing_filter = rownames(counts_only) %in% rownames(filtered)
+        median = apply(counts_only(), 1, median),
+        variance = apply(counts_only(), 1, var),
+        num_zeros = apply(counts_only(), 1, function(x) sum(x>0)),
+        passing_filter = rownames(counts_only()) %in% rownames(filtered_counts())
       )})
     
     medcount_vs_var <- function(gene_stats) {
-      p <- ggplot(gene_stats, aes(x=median, y=variance, color=passing_filter)) + 
+      p <- ggplot(gene_stats, aes(x=median+1, y=variance+1, color=passing_filter)) + 
         geom_point() +
         scale_color_manual(values = c("TRUE" = "darkblue", "FALSE" = "lightpink")) +
         scale_x_log10() +
@@ -184,19 +202,18 @@ server <- function(input, output, session) {
     
     # heatmap tab
     make_heatmap <- function(filtered, log_transform) {
-      if (log_transform) {
-        mat <- log10(filtered + 1)
-      } else {
-        mat <- filtered
-      }
-      p<- pheatmap(mat,
-                   show_rownames = FALSE,
-                   show_colnames = TRUE,
-                   cluster_rows = TRUE,
-                   cluster_cols = TRUE,
-                   fontsize_col = 5
+  
+      vars <- apply(filtered, 1, var)
+      top_genes <- filtered[order(vars, decreasing=TRUE)[1:500], ]
+      
+      mat <- if (log_transform) log10(top_genes + 1) else top_genes
+      
+      pheatmap(mat,
+               show_rownames = FALSE,
+               show_colnames = FALSE,
+               cluster_rows = TRUE,
+               cluster_cols = TRUE
       )
-      return(p)
     }
     
     # PCA plot tab
@@ -292,7 +309,14 @@ server <- function(input, output, session) {
     # --- Connect Outputs to Server ---------------------------------------
     
     #' Sample table
-    output$samples_table <- renderDT({
+    output$samples_table <- renderTable({
+      req(input$metadata_file)
+      make_summary_table(metadata())
+    })
+    
+    #' Stats table
+    output$stats_table <- DT::renderDT({
+      req(input$metadata_file)
       make_data_table(metadata())
     })
     
@@ -306,7 +330,9 @@ server <- function(input, output, session) {
     
     #' Counts table
     output$counts_table <- renderTable({
-      filtered_sum_table(counts(),filtered_counts())
+      req(input$counts_file)
+      counts_only <- counts()[, -1] 
+      filtered_sum_table(counts_only,filtered_counts())
     })
     
     #' Counts Diagnostic scatter plot
@@ -323,6 +349,7 @@ server <- function(input, output, session) {
     
     #' Counts PCA scatter plot
     output$pca_plot <- renderPlot({
+      req(input$counts_file, input$metadata_file)
       make_pca_plot(
         filtered_counts(),
         metadata()
@@ -339,10 +366,19 @@ server <- function(input, output, session) {
    })
    
    #'  Individ. gene plot
-   output$plot_individual_geneexpression <- renderPlot({
+   output$individual_gene_plot <- renderPlot({
      gene_data <- prepare_gene_data(counts(), metadata(), input$gene_name)
      plot_individual_geneexpression(gene_data, input$plot_type)
    })
-    
+   
+   output$debug <- renderPrint({
+     req(input$counts_file)
+     cat("dimensions:", dim(counts()), "\n")
+     cat("NA count:", sum(is.na(counts())), "\n")
+     cat("first few colnames:", head(colnames(counts())), "\n")
+     cat("class of first data col:", class(counts()[,2]), "\n")
+   })
+   
+   
 } # This line is what will actually launch the app
 shinyApp(ui = ui, server = server)

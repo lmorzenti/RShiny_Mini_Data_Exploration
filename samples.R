@@ -99,4 +99,6 @@ make_sample_plot <- function(df, col_name, group_by) {
 make_sample_plot(clean_metadata, "diagnosis", "diagnosis")
 
 
-
+test <- read.csv("huntington_counts.csv")
+colnames(test)[1:4] 
+head(test[, 1])  

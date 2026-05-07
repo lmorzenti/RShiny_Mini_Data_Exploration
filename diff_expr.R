@@ -77,4 +77,3 @@ server <- function(input, output, session) {
 
 #this will run the app 
 shinyApp(ui = ui, server = server)
-

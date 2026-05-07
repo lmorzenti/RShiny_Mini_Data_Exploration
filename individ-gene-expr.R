@@ -62,3 +62,10 @@ plot_individual_geneexpression(gene_data, "boxplot")
 plot_individual_geneexpression(gene_data, "violinplot")
 plot_individual_geneexpression(gene_data, "barplot")
 plot_individual_geneexpression(gene_data, "beeswarm")
+
+metadata_test <- read.csv("metadata.csv")
+nrow(metadata_test)   # should be 69
+ncol(counts_only) 
+metadata_test$sample
+colnames(counts_only)
+
