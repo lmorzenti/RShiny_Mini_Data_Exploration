@@ -1,4 +1,4 @@
-# All libraries
+# load in all libraries used here
 library(shiny)
 library(bslib)
 library(ggplot2)
@@ -12,12 +12,28 @@ library(pheatmap)
 
 # Define UI
 ui <- fluidPage(
-  titlePanel("Data Exploration of Given Gene Dataset"),
+  titlePanel("Data Exploration of mRNA-Seq profiling of human post-mortem BA9 brain tissue for Huntington's Disease and neurologically normal individuals"),
   sidebarLayout(
     sidebarPanel(
-      fileInput("file", "Load in results",  accept = c(".csv", ".tsv")),
-      p("This application only accepts csv and tsv files") 
-    ),
+      fileInput("metadata_file", "Upload metadata",  accept = c(".csv", ".tsv", ".txt")),
+      fileInput("counts_file", "Upload counts matrix",  accept = c(".csv", ".tsv", ".txt")),
+      fileInput("DiffExp_file", "Upload DESeq2 results",  accept = c(".csv", ".tsv", ".txt")), 
+      hr(),
+      sliderInput("variance_percentile", "Variance filter percentile",
+        min = 0, max = 100, value = 50),
+      
+      numericInput("min_nonzero", "Minimum nonzero samples",
+        value = 3),
+      
+      sliderInput("padj_slider", "Adjusted p-value cutoff (10^x)",
+        min = -10, max = 0, value = -2),
+      
+      textInput("gene_name", "Gene to plot",
+        value = "HTT"),
+      
+      selectInput("plot_type", "Gene plot type",
+        choices = c("boxplot", "violinplot", "beeswarm", "barplot"))
+      ),
     mainPanel(
       tabsetPanel(
         tabPanel("Samples", 
@@ -39,13 +55,32 @@ ui <- fluidPage(
                  )),
         tabPanel("Individual Gene Expression", 
                  tabsetPanel(
-                   tabPanel("Plot", plotOutput("volcano_plot"))
+                   tabPanel("Plot", plotOutput("individual_gene_plot"))
                  )),
       ))))
 
 
 server <- function(input, output, session) {
 
+  # load in and save data  - 
+  metadata <- reactive({
+    req(metadata_file$file)
+    df <- read.delim(input$metadata_file$datapath, check.names=FALSE)
+    return(df)
+  })
+  
+  counts <- reactive({
+    req(counts_file$file)
+    df <- read.delim(input$counts_file$datapath, check.names=FALSE)
+    return(df)
+  })
+  
+  de_results <- reactive({
+    req(DiffExp_file$file)
+    df <- read.delim(input$DiffExp_file$datapath, check.names=FALSE)
+    return(df)
+  })
+  
   # --- Tab 1: Samples --------------------------------------------
 
     # build summary table
@@ -99,6 +134,13 @@ server <- function(input, output, session) {
       return (after_both)
     }
     
+    filtered_counts <- reactive({
+      filter_counts(
+        counts(),
+        input$variance_percentile,
+        input$min_nonzero
+      )})
+    
     filtered_sum_table <- function(counts_only, filtered) {
       table <- data.frame(
         `Number of Samples` = ncol(counts_only),
@@ -112,12 +154,15 @@ server <- function(input, output, session) {
     }
     
     # scatter plot tab
-    gene_stats <- data.frame(
-      median = apply(counts_only, 1, median),
-      variance = apply(counts_only, 1, var),
-      num_zeros = apply(counts_only, 1, function(x) sum(x>0)),
-      passing_filter = rownames(counts_only) %in% rownames(filtered)
-    )
+    gene_stats <- reactive({
+      counts_only <- counts()
+      filtered <- filtered_counts()
+      data.frame(
+        median = apply(counts_only, 1, median),
+        variance = apply(counts_only, 1, var),
+        num_zeros = apply(counts_only, 1, function(x) sum(x>0)),
+        passing_filter = rownames(counts_only) %in% rownames(filtered)
+      )})
     
     medcount_vs_var <- function(gene_stats) {
       p <- ggplot(gene_stats, aes(x=median, y=variance, color=passing_filter)) + 
@@ -244,39 +289,60 @@ server <- function(input, output, session) {
     }
     
     
-    #' This area will be where the above functions connect to the interfac
+    # --- Connect Outputs to Server ---------------------------------------
+    
     #' Sample table
-    #output$samples_table <- renderTable({
-     # samples_table(load_data())
-    #})
+    output$samples_table <- renderDT({
+      make_data_table(metadata())
+    })
     
     #' Sample plot
-    #output$samples_plot <- renderPlot({
-   # })
+    output$samples_plot <- renderPlot({
+      df <- metadata()
+      numeric_cols <- names(df)[sapply(df, is.numeric)]
+      req(length(numeric_cols)>0)
+      make_sample_plot(df, numeric_cols[1], "diagnosis")
+    })
     
     #' Counts table
-   # output$counts_table <- renderTable({
-    #})
+    output$counts_table <- renderTable({
+      filtered_sum_table(counts(),filtered_counts())
+    })
     
     #' Counts Diagnostic scatter plot
-   # output$diagnostic_scatter_plot <- renderPlot({
-   # })
+    output$diagnostic_scatter_plot <- renderPlot({
+      medcount_vs_var(gene_stats())
+    })
     
     #' Counts heatmap
-    #output$heatmap_plot <- renderPlot({
-    #})
+    output$heatmap_plot <- renderPlot({
+      make_heatmap(
+        filtered_counts(),
+        TRUE)
+    })
     
     #' Counts PCA scatter plot
-    #output$pca_plot <- renderPlot({
-   # })
+    output$pca_plot <- renderPlot({
+      make_pca_plot(
+        filtered_counts(),
+        metadata()
+      )})
 
     #' Diff. Expression table
-    #output$differential_express_table <- renderTable({
-     # draw_table(load_data(), input$slider)
-   # }) 
+    output$differential_express_table <- renderTable({
+      draw_table(de_results(), input$padj_slider)
+    }) 
 
     #' Diff. Expression volcano plot
+   output$volcano_plot <- renderPlot({
+     volcano_plot(de_results(), "log2FoldChange", "padj", input$padj_slider, "red", "grey")
+   })
    
+   #'  Individ. gene plot
+   output$plot_individual_geneexpression <- renderPlot({
+     gene_data <- prepare_gene_data(counts(), metadata(), input$gene_name)
+     plot_individual_geneexpression(gene_data, input$plot_type)
+   })
     
 } # This line is what will actually launch the app
 shinyApp(ui = ui, server = server)
