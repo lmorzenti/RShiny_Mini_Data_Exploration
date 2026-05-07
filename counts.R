@@ -130,6 +130,71 @@ make_heatmap(filtered, TRUE)
 
 #part 4 - tab with a scatter plot of PCA projections
 
+pca_result <- prcomp(t(filtered), scale. = TRUE)
+summary(pca_result)
+# look at this
+head(pca_result$x)
+# proportion of variance for each PC
+variance_explained <- summary(pca_result)$importance[2,]
+variance_explained[1]  # PC1
+variance_explained[2]  # PC2
+variance_explained
 
+#sample for the sake of this portion
+clean_metadata <- metadata[, c(
+  "title",
+  "diagnosis:ch1",
+  "age of death:ch1",
+  "age of onset:ch1",
+  "pmi:ch1",
+  "rin:ch1",
+  "mrna-seq reads:ch1"
+)]
 
+#remove the :ch1 from the names 
+colnames(clean_metadata) <- c(
+  "sample", "diagnosis", "age_of_death", 
+  "age_of_onset", "pmi", "rin", "mrna_seq_reads"
+)
+
+pca_coords <- as.data.frame(pca_result$x)
+pca_coords$diagnosis <- clean_metadata$diagnosis
+
+# step 3: include the % variance in each component
+variance_explained <- summary(pca_result)$importance[2,]
+x_label <- paste0("PC1 (", round(variance_explained[1] * 100, 2), "%)")
+y_label <- paste0("PC2 (", round(variance_explained[2] * 100, 2), "%)")
+
+ggplot(pca_coords, aes(x = PC1, y = PC2, color = diagnosis)) +
+  geom_point() +
+  labs(x = x_label, y = y_label)
+
+head(pca_coords)
+
+# Final step: make this into an actual function to use
+
+make_pca_plot <- function(filtered, clean_metadata, pc_x=1, pc_y=2) {
+  
+  pca_result <- prcomp(t(filtered), scale. = TRUE)
+  
+  # second step 
+  pca_coords <- as.data.frame(pca_result$x)
+  pca_coords$diagnosis <- clean_metadata$diagnosis
+  
+  # plot it
+  variance_explained <- summary(pca_result)$importance[2,]
+  x_label <- paste0("PC", pc_x, " (", round(variance_explained[pc_x] * 100, 2), "%)")
+  y_label <- paste0("PC", pc_y, " (", round(variance_explained[pc_y] * 100, 2), "%)")
+  
+  ggplot(pca_coords, aes(x = .data[[paste0("PC", pc_x)]], y = .data[[paste0("PC", pc_y)]], color = diagnosis)) +
+    geom_point() +
+    labs(x = x_label, y = y_label)
+  
+}
+
+# test the above function 
+
+make_pca_plot(filtered, clean_metadata, 1, 2)
+make_pca_plot(filtered, clean_metadata, 1, 3)
+make_pca_plot(filtered, clean_metadata, 2, 3)
 
