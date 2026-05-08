@@ -9,25 +9,37 @@ library(ggbeeswarm)
 library(DT)
 library(pheatmap)
 
-# add this at the very top of your app, before ui
-options(shiny.maxRequestSize = 100 * 1024^2)  # 100MB limit
+# increases the size of the files that I can update
+options(shiny.maxRequestSize = 100 * 1024^2)  
 
 # Define UI
 ui <- fluidPage(
   titlePanel("Data Exploration of mRNA-Seq profiling of human post-mortem BA9 brain tissue for Huntington's Disease and neurologically normal individuals"),
   sidebarLayout(
     sidebarPanel(
-      fileInput("metadata_file", "Upload metadata",  accept = c(".csv", ".tsv", ".txt")),
-      fileInput("counts_file", "Upload counts matrix",  accept = c(".csv", ".tsv", ".txt")),
-      fileInput("DiffExp_file", "Upload DESeq2 results",  accept = c(".csv", ".tsv", ".txt")), 
+      fileInput("metadata_file", "Upload metadata",  accept = c(".csv", ".tsv")),
+      fileInput("counts_file", "Upload counts matrix",  accept = c(".csv", ".tsv")),
+      fileInput("DiffExp_file", "Upload DESeq2 results",  accept = c(".csv", ".tsv")), 
       hr(),
       
-      # only show on Counts tab
+      # sidebar only to show on side bar
+      conditionalPanel(
+        condition = "input.tabs == 'Metadata'",
+        selectInput("col_to_plot", "Column to plot", choices = NULL),
+        selectInput("sample_plot_type", "Plot type",
+                    choices = c("density", "histogram", "violin")),
+        actionButton("plot_samples_button", "Generate Plot")
+      ),
+      
       conditionalPanel(
         condition = "input.tabs == 'Counts'",
         sliderInput("variance_percentile", "Variance filter percentile",
                     min = 0, max = 100, value = 50),
-        numericInput("min_nonzero", "Minimum nonzero samples", value = 3)
+        numericInput("min_nonzero", "Minimum nonzero samples", value = 3),
+        hr(),
+        numericInput("pc_x", "PC X axis", value = 1, min = 1, max = 10),
+        numericInput("pc_y", "PC Y axis", value = 2, min = 1, max = 10),
+        actionButton("run_pca_button", "Generate PCA Plot")
       ),
       
       conditionalPanel(
@@ -39,9 +51,10 @@ ui <- fluidPage(
       conditionalPanel(
         condition = "input.tabs == 'Individual Gene Expression'",
         selectizeInput("gene_name", "Select gene", choices = NULL),
-        selectInput("plot_type", "Gene plot type",
+        selectInput("categorical_var", "Group by", choices = NULL),
+        selectInput("gene_plot_type", "Gene plot type",
                     choices = c("boxplot", "violinplot", "beeswarm", "barplot")),
-        actionButton("plot_button", "Plot Gene")
+        actionButton("plot_gene_button", "Plot Gene")
       )
     ),
       
@@ -49,34 +62,38 @@ ui <- fluidPage(
     mainPanel(
       tabsetPanel(
         id = "tabs",
-        tabPanel("Samples", 
+        
+        tabPanel("Metadata", 
                  tabsetPanel(
-                   tabPanel("Summary", tableOutput("samples_table")),
-                   tabPanel("Stats",  DT::dataTableOutput("stats_table")),
+                   tabPanel("Sample Summary", tableOutput("samples_table"), textOutput("samples_info")),
+                   tabPanel("Sample Stats",  DT::dataTableOutput("stats_table")),
                    tabPanel("Plots", plotOutput("samples_plot"))
                  )),
         tabPanel("Counts", 
                  tabsetPanel(
-                   tabPanel("Table", tableOutput("counts_table")),
-                   tabPanel("Diagnostic Scatter Plot", plotOutput("diagnostic_scatter_plot")),
+                   tabPanel("Summary", tableOutput("counts_table")),
+                   tabPanel("Diagnostic Scatter Plots",
+                            plotOutput("diagnostic_var_plot"),
+                            plotOutput("diagnostic_zero_plot")),
                    tabPanel("Clustered Heatmap", plotOutput("heatmap_plot")),
                    tabPanel("PCA Scatter Plot", plotOutput("pca_plot"))
                  )),
         tabPanel("Differential Expression", 
                  tabsetPanel(
-                   tabPanel("Table", tableOutput("differential_express_table")),
+                   tabPanel("Table", DT::dataTableOutput("differential_express_table")),
                    tabPanel("Volcano Plot", plotOutput("volcano_plot"))
                  )),
         tabPanel("Individual Gene Expression",
                  tabsetPanel(
                    tabPanel("Plot", plotOutput("individual_gene_plot"))
                  ))
-      ),)))
+      ) ) ) )
 
 
 server <- function(input, output, session) {
-
+  
   # load in and save data  - 
+  
   metadata <- reactive({
     req(input$metadata_file)
     df <- read.csv(input$metadata_file$datapath, check.names=FALSE)
@@ -95,8 +112,68 @@ server <- function(input, output, session) {
     return(df)
   })
   
-  # --- Tab 1: Samples --------------------------------------------
+  data_meta <- reactive({
+    req(input$metadata_file)
+    
+    ext <- tools::file_ext(input$metadata_file$name)
+    
+    validate(
+      need(ext %in% c("csv", "tsv"), "Metadata must be .csv or .tsv file")
+    )
+    
+    if (ext == "csv") {
+      read.csv(input$metadata_file$datapath)
+    } else {
+      read.delim(input$metadata_file$datapath)
+    }
+  })
+  
+  data_counts <- reactive({
+    req(input$counts_file)
+    
+    ext <- tools::file_ext(input$counts_file$name)
+    
+    validate(
+      need(ext %in% c("csv", "tsv"), "Counts file must be .csv or .tsv")
+    )
+    
+    if (ext == "csv") {
+      read.csv(input$counts_file$datapath)
+    } else {
+      read.delim(input$counts_file$datapath)
+    }
+  })
+  
+  data_diffexp <- reactive({
+    req(input$DiffExp_file)
+    
+    ext <- tools::file_ext(input$DiffExp_file$name)
+    
+    validate(
+      need(ext %in% c("csv", "tsv"), "Counts file must be .csv or .tsv")
+    )
+    
+    if (ext == "csv") {
+      read.csv(input$DiffExp_file$datapath)
+    } else {
+      read.delim(input$DiffExp_file$datapath)
+    }
+  })
 
+  # --- observes ---------------------------------------------- 
+  
+  observe({
+    req(input$metadata_file)
+    df <- metadata()
+    numeric_cols <- names(df)[sapply(df, is.numeric)]
+    cat_cols <- names(df)[!sapply(df, is.numeric)]
+    
+    updateSelectInput(session, "col_to_plot", choices = numeric_cols)
+    updateSelectInput(session, "categorical_var", choices = cat_cols)
+  })
+  
+  # --- Tab 1: Samples --------------------------------------------
+  
     # build summary table
   make_summary_table <- function(df) {
     do.call(rbind, lapply(names(df), function(col) {
@@ -122,18 +199,50 @@ server <- function(input, output, session) {
     }
    
     # build the sample plot
-    make_sample_plot <- function(df, col_name, group_by) {
-      p <- ggplot(df, aes(x = .data[[col_name]], fill = .data[[group_by]])) +
-        theme_classic() + 
-        geom_density(alpha = 0.5)
-      return(p)
+    make_sample_plot <- function(df, col_name, plot_type) {
+      
+      if (plot_type == "violin") {
+        
+        p <- ggplot(df, aes(x = diagnosis,
+                            y = .data[[col_name]],
+                            fill = diagnosis)) +
+          geom_violin()
+        
+      } else if (plot_type == "density") {
+        
+        p <- ggplot(df, aes(x = .data[[col_name]], fill = diagnosis)) +
+          geom_density(alpha = 0.5)
+        
+      } else if (plot_type == "histogram") {
+        
+        p <- ggplot(df, aes(x = .data[[col_name]], fill = diagnosis)) +
+          geom_histogram(position = "identity", alpha = 0.5, bins = 30)
+        
+      }
+      
+      p +
+        theme_classic() +
+        labs(
+          title = paste(plot_type, "of", col_name, "by diagnosis"),
+          x = col_name,
+          y = "value",
+          fill = "Diagnosis"
+        )
     }
     
     # --- Tab 2: Counts --------------------------------------------
     
     counts_only <- reactive({
       req(input$counts_file)
-      counts()[, -1]
+      df <- counts()
+      
+      rownames(df) <- df[[1]]
+      df <- df[, -1]
+      
+      df <- as.matrix(df)
+      storage.mode(df) <- "numeric"
+      
+      df
     })
     
     # filter and Summarize effect of filtering
@@ -159,8 +268,13 @@ server <- function(input, output, session) {
     }
     
     filtered_counts <- reactive({
-      filter_counts(counts_only(),input$variance_percentile,input$min_nonzero)
-      })
+      req(counts_only())
+      filter_counts(
+        counts_only(),
+        input$variance_percentile,
+        input$min_nonzero
+      )
+    })
     
     filtered_sum_table <- function(counts_only, filtered) {
       table <- data.frame(
@@ -186,91 +300,184 @@ server <- function(input, output, session) {
     
     # scatter plot tab
     gene_stats <- reactive({
+      mat <- counts_only()
+      filt <- filtered_counts()
+      
       data.frame(
-        median = apply(counts_only(), 1, median),
-        variance = apply(counts_only(), 1, var),
-        num_zeros = apply(counts_only(), 1, function(x) sum(x>0)),
-        passing_filter = rownames(counts_only()) %in% rownames(filtered_counts())
-      )})
-    
-    medcount_vs_var <- function(gene_stats) {
-      p <- ggplot(gene_stats, aes(x=median+1, y=variance+1, color=passing_filter)) + 
-        geom_point() +
-        scale_color_manual(values = c("TRUE" = "darkblue", "FALSE" = "lightpink")) +
-        scale_x_log10() +
-        scale_y_log10() 
-      return(p)
-    }
-    
-    medcount_vs_numofzero <- function(gene_stats) {
-      m <- ggplot(gene_stats, aes(x=median, y=num_zeros, color=passing_filter)) + 
-        geom_point() +
-        scale_color_manual(values = c("TRUE" = "darkblue", "FALSE" = "lightpink")) +
-        scale_x_log10() +
-        scale_y_log10()  
-      return(m)
-    }
-    
-    # heatmap tab
-    make_heatmap <- function(filtered, log_transform) {
-  
-      vars <- apply(filtered, 1, var)
-      top_genes <- filtered[order(vars, decreasing=TRUE)[1:500], ]
-      
-      mat <- if (log_transform) log10(top_genes + 1) else top_genes
-      
-      pheatmap(mat,
-               show_rownames = FALSE,
-               show_colnames = FALSE,
-               cluster_rows = TRUE,
-               cluster_cols = TRUE
+        median = apply(mat, 1, median, na.rm = TRUE),
+        variance = apply(mat, 1, var, na.rm = TRUE),
+        num_zeros = apply(mat, 1, function(x) sum(x == 0, na.rm = TRUE)),
+        passing_filter = rownames(mat) %in% rownames(filt)
       )
+    })
+    
+    medcount_vs_var <- function(df) {
+      ggplot(df, aes(x = log10(median + 1), y = log10(variance + 1), color = passing_filter)) +
+        geom_point(alpha = 0.7) +
+        scale_color_manual(
+          values = c("TRUE" = "darkblue", "FALSE" = "lightpink"),
+          labels = c("TRUE" = "Passed filter", "FALSE" = "Filtered out"),
+          name = "Filter status"
+        ) +
+        labs(
+          title = "Gene filtering diagnostics: Median vs Variance",
+          x = "log10(Median + 1)",
+          y = "log10(Variance + 1)"
+        ) +
+        theme_classic()
+    }
+    
+    medcount_vs_numofzero <- function(df) {
+      ggplot(df, aes(x = log10(median + 1), y = num_zeros, color = passing_filter)) +
+        geom_point(alpha = 0.7) +
+        scale_color_manual(
+          values = c("TRUE" = "darkblue", "FALSE" = "lightpink"),
+          labels = c("TRUE" = "Passed filter", "FALSE" = "Filtered out"),
+          name = "Filter status"
+        ) +
+        labs(
+          title = "Gene filtering diagnostics: Median vs Zero counts",
+          x = "log10(Median + 1)",
+          y = "Number of zero-expression samples"
+        ) +
+        theme_classic()
+    }
+    # heatmap tab
+    make_heatmap <- function(mat, log_transform = TRUE) {
+      
+      vars <- apply(mat, 1, var, na.rm = TRUE)
+      top_genes <- mat[order(vars, decreasing = TRUE)[1:min(150, nrow(mat))], ]
+      
+      if (log_transform) {
+        top_genes <- log10(top_genes + 1)
+      }
+      
+      p <- pheatmap::pheatmap(
+        top_genes,
+        show_rownames = FALSE,
+        show_colnames = FALSE,
+        cluster_rows = TRUE,
+        cluster_cols = TRUE,
+        silent = TRUE
+      )
+      
+      grid::grid.newpage()
+      grid::grid.draw(p$gtable)
     }
     
     # PCA plot tab
-    make_pca_plot <- function(filtered, clean_metadata, pc_x=1, pc_y=2) {
+    make_pca_plot <- function(mat, meta, pc_x = 1, pc_y = 2) {
       
-      pca_result <- prcomp(t(filtered), scale. = TRUE)
+      pca <- prcomp(t(mat), scale. = TRUE)
       
-      # second step 
-      pca_coords <- as.data.frame(pca_result$x)
-      pca_coords$diagnosis <- clean_metadata$diagnosis
+      var_exp <- (pca$sdev^2) / sum(pca$sdev^2)
       
-      # plot it
-      variance_explained <- summary(pca_result)$importance[2,]
-      x_label <- paste0("PC", pc_x, " (", round(variance_explained[pc_x] * 100, 2), "%)")
-      y_label <- paste0("PC", pc_y, " (", round(variance_explained[pc_y] * 100, 2), "%)")
+      df <- data.frame(pca$x)
       
-      ggplot(pca_coords, aes(x = .data[[paste0("PC", pc_x)]], y = .data[[paste0("PC", pc_y)]], color = diagnosis)) +
-        geom_point() +
+      # safer matching
+      if ("sample" %in% colnames(meta)) {
+        df$sample <- rownames(df)
+        df <- merge(df, meta, by = "sample", all.x = TRUE)
+      } else {
+        df$sample <- rownames(df)
+        df <- merge(df, meta, by = "sample", all.x = TRUE)
+      }
+      
+      ggplot(df, aes_string(
+        x = paste0("PC", pc_x),
+        y = paste0("PC", pc_y),
+        color = "diagnosis"
+      )) +
+        geom_point(size = 2, alpha = 0.8) +
         theme_classic() +
-        labs(x = x_label, y = y_label)
-      
+        labs(
+          x = paste0("PC", pc_x, " (", round(var_exp[pc_x] * 100, 1), "%)"),
+          y = paste0("PC", pc_y, " (", round(var_exp[pc_y] * 100, 1), "%)"),
+          color = "Diagnosis"
+        )
     }
     
     # --- Tab 3: Differential Expression --------------------------------------------
     # Volcano plot 
-    volcano_plot <-
-      function(dataf, x_name, y_name, slider, color1, color2) {
+    volcano_plot <- function(dataf, x_name, y_name, slider,
+                             color1 = "darkblue", color2 = "lightpink") {
+      
+      padj_cutoff <- 10^slider
+      
+      dataf$neg_log10_p <- -log10(dataf[[y_name]])
+      
+      dataf$significance <- ifelse(
+        dataf[[y_name]] < padj_cutoff,
+        "Significant",
+        "Not significant"
+      )
+      
+      p <- ggplot(dataf, aes(x = .data[[x_name]], y = neg_log10_p)) +
         
-        dataf$transformed_y <- -log10(dataf[[y_name]]) 
-        dataf$significance <- ifelse(dataf[[y_name]] < 10^slider, "TRUE", "FALSE")
+        geom_point(aes(color = significance), alpha = 0.7, size = 2) +
         
-        p <- ggplot(dataf, aes(x = .data[[x_name]], y = transformed_y)) +
-          geom_point(size=2, aes(color = significance)) +
-          scale_color_manual(values = c("TRUE" = color1, "FALSE" = color2)) +
-          labs(x = x_name, y = "-log10(padj)", title = "Volcano plot") +
-          theme_classic()
+        scale_color_manual(values = c(
+          "Significant" = color1,
+          "Not significant" = color2
+        )) +
         
-        return(p)
-      }
+        geom_hline(yintercept = -log10(padj_cutoff), linetype = "dashed") +
+        geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
+        
+        # upreg label
+        annotate(
+          "text",
+          x = 2,   # adjust if needed
+          y = max(dataf$neg_log10_p, na.rm = TRUE),
+          label = "Upregulated",
+          color = "black",
+          fontface = "bold"
+        ) +
+        
+        # downreg label
+        annotate(
+          "text",
+          x = -2,  # adjust if needed
+          y = max(dataf$neg_log10_p, na.rm = TRUE),
+          label = "Downregulated",
+          color = "black",
+          fontface = "bold"
+        ) +
+        
+        labs(
+          x = "log2 Fold Change",
+          y = "-log10 adjusted p-value",
+          title = paste(
+            "Visulization of DESeq2 Differential Expression Analysis (padj < 10^",
+            slider, ")", sep = ""
+          ),
+          color = "Significance"
+        ) +
+        
+        theme_classic(base_size = 13) +
+        theme(
+          legend.position = "right"
+        )
+      
+      return(p)
+    }
     
+    # sortable table
     draw_table <- function(dataf, slider) {
       filtered <-  dataf[dataf$padj < 10^slider, ]
       filtered <- na.omit(filtered)
       filtered$pvalue <- formatC(filtered$pvalue, format = "e", digits = 3)
       filtered$padj   <- formatC(filtered$padj,   format = "e", digits = 3)
-      return(filtered)
+      
+       DT::datatable(
+        filtered,
+        options = list(
+          pageLength = 10,
+          autoWidth = TRUE,
+          orderClasses = TRUE
+        ),
+        rownames = FALSE
+      )
     }
     
     # --- Tab 4: Individual Gene Expression --------------------------------------------
@@ -307,24 +514,70 @@ server <- function(input, output, session) {
     })
     
     # plot the gene expression
-    plot_individual_geneexpression <- function(gene_data, plot_type) {
-      p <- ggplot(gene_data, aes(x = diagnosis, y = expression, fill = diagnosis)) +
+    plot_individual_geneexpression <- function(gene_data, plot_type, categorical_var) {
+      p <- ggplot(gene_data, aes(x = .data[[categorical_var]], 
+                                 y = expression, 
+                                 fill = .data[[categorical_var]],
+                                 color = .data[[categorical_var]])) +
         theme_classic() +
+        theme(legend.position = "none") +
         labs(
-          title=paste("Expression of", gene_data$X[1]),
-          x = "Diagnosis",
-          y = "Normalized Expression"
-        ) +
-        scale_fill_manual(
-          values=c("Huntington's Disease" = "darkblue",
-                   "Neurologically normal" = "lightblue")
+          title = paste("Expression of", gene_data$X[1] ),
+          x = categorical_var,
+          y = "Normalized Expression", 
+          fill = categorical_var,
+          color = categorical_var
         )
       
-      if (plot_type == "boxplot") p<-p + geom_boxplot()
-      else if (plot_type == "violinplot") p<-p + geom_violin()
-      else if (plot_type == "barplot") p<-p + geom_col()
-      else if (plot_type == "beeswarm") p<-p + geom_beeswarm()
+      if (plot_type == "boxplot") {
+        p <- p +
+          geom_boxplot(
+            color = "black",
+            outlier.shape = NA
+          ) 
+      }
+      else if (plot_type == "violinplot") {
+        p <- p +
+          geom_violin(
+            color = "black",
+            alpha = 0.7
+          ) +
+          geom_beeswarm(
+            shape = 21,
+            color = "black",
+            size = 2
+          )
+      }
+    
+      else if (plot_type == "barplot") {
+          p <- p +
+            stat_summary(fun = mean, geom = "col", color="black") +
+            stat_summary(fun.data = mean_se,
+                        geom = "errorbar",
+                        color = "black",
+                        width = 0.2)
+        }
+      else if (plot_type == "beeswarm") p <- p + geom_beeswarm()
       else stop("Invalid plot type")
+      
+      if (categorical_var == "diagnosis") {
+        
+        p <- p +
+          theme(
+            legend.position = "right"
+          )
+        
+      } else {
+        
+        p <- p +
+          theme(
+            legend.position = "none",
+            axis.text.x = element_text(
+              angle = 60,
+              hjust = 1
+            )
+          )
+      }
       
       return(p)
     }
@@ -338,70 +591,146 @@ server <- function(input, output, session) {
       make_summary_table(metadata())
     })
     
+    #' A little more information about the data for the user
+    output$samples_info <- renderText({
+      req(input$metadata_file)
+      paste("Rows:", nrow(metadata()), "| Columns:", ncol(metadata()))
+    })
+    
     #' Stats table
     output$stats_table <- DT::renderDT({
       req(input$metadata_file)
       make_data_table(metadata())
     })
     
+    sample_plot_inputs <- eventReactive(input$plot_samples_button, {
+      list(
+        col = input$col_to_plot,
+        type = input$sample_plot_type
+      )
+    })
+    
     #' Sample plot
     output$samples_plot <- renderPlot({
-      df <- metadata()
-      numeric_cols <- names(df)[sapply(df, is.numeric)]
-      req(length(numeric_cols)>0)
-      make_sample_plot(df, numeric_cols[1], "diagnosis")
+      req(sample_plot_inputs())
+      
+      make_sample_plot(
+        metadata(),
+        sample_plot_inputs()$col,
+        sample_plot_inputs()$type
+      )
     })
     
     #' Counts table
     output$counts_table <- renderTable({
-      req(input$counts_file)
-      counts_only <- counts()[, -1] 
-      filtered_sum_table(counts_only,filtered_counts())
+      req(counts_only(), filtered_counts())
+      
+      filtered_sum_table(
+        counts_only(),
+        filtered_counts()
+      )
     })
     
-    #' Counts Diagnostic scatter plot
-    output$diagnostic_scatter_plot <- renderPlot({
+    #' Counts Diagnostic scatter plots
+    output$diagnostic_var_plot <- renderPlot({
       medcount_vs_var(gene_stats())
+    })
+    
+    output$diagnostic_zero_plot <- renderPlot({
+      medcount_vs_numofzero(gene_stats())
     })
     
     #' Counts heatmap
     output$heatmap_plot <- renderPlot({
-      make_heatmap(
-        filtered_counts(),
-        TRUE)
+      req(filtered_counts())
+      make_heatmap(filtered_counts(), TRUE)
     })
     
     #' Counts PCA scatter plot
+    
+    pca_inputs <- eventReactive(input$run_pca_button, {
+      
+      mat <- filtered_counts()
+      meta <- metadata()
+      
+      # hard safety checks (no silent failure)
+      if (is.null(mat) || nrow(mat) < 2 || ncol(mat) < 2) {
+        return(NULL)
+      }
+      
+      mat <- as.matrix(mat)
+      storage.mode(mat) <- "numeric"
+      
+      list(
+        mat = mat,
+        meta = meta,
+        pc_x = input$pc_x,
+        pc_y = input$pc_y
+      )
+    })
+    
     output$pca_plot <- renderPlot({
-      req(input$counts_file, input$metadata_file)
+      
+      pca_obj <- pca_inputs()
+      
+      if (is.null(pca_obj)) {
+        return(NULL)
+      }
+      
       make_pca_plot(
-        filtered_counts(),
-        metadata()
-      )})
+        pca_obj$mat,
+        pca_obj$meta,
+        pca_obj$pc_x,
+        pca_obj$pc_y
+      )
+    })
 
     #' Diff. Expression table
-    output$differential_express_table <- renderTable({
+    output$differential_express_table <- DT::renderDT({
       draw_table(de_results(), input$padj_slider)
     }) 
 
     #' Diff. Expression volcano plot
    output$volcano_plot <- renderPlot({
-     volcano_plot(de_results(), "log2FoldChange", "padj", input$padj_slider, "red", "grey")
+     volcano_plot(de_results(), "log2FoldChange", "padj", input$padj_slider, "darkblue", "lightpink")
    })
    
    #'  Individ. gene plot
-   output$individual_gene_plot <- renderPlot({
-     req(input$DiffExp_file, input$counts_file, input$metadata_file)
+   gene_plot_inputs <- eventReactive(input$plot_gene_button, {
+     
+     req(input$DiffExp_file,
+         input$counts_file,
+         input$metadata_file)
+     
      req(input$gene_name != "")
-     gene_data <- prepare_gene_data(counts(), metadata(), input$gene_name)
-     plot_individual_geneexpression(gene_data, input$plot_type)
+     req(input$categorical_var != "")
+     req(input$gene_plot_type != "")
+     
+     gene_df <- prepare_gene_data(
+       counts(),
+       metadata(),
+       input$gene_name
+     )
+     list(
+       gene_data = gene_df,
+       plot_type = input$gene_plot_type,
+       categorical_var = input$categorical_var
+     )
    })
    
-   output$debug <- renderPrint({
-     req(input$metadata_file)
-     cat("diagnosis values:", unique(metadata()$diagnosis), "\n")
+   output$individual_gene_plot <- renderPlot({
+     req(gene_plot_inputs())
+     plot_individual_geneexpression(
+       gene_plot_inputs()$gene_data,
+       gene_plot_inputs()$plot_type,
+       gene_plot_inputs()$categorical_var
+     )
    })
    
+   outputOptions(output, "heatmap_plot", suspendWhenHidden = FALSE)
+   outputOptions(output, "pca_plot", suspendWhenHidden = FALSE)
+   outputOptions(output, "diagnostic_var_plot", suspendWhenHidden = FALSE)
+   outputOptions(output, "diagnostic_zero_plot", suspendWhenHidden = FALSE)
    
 } # This line is what will actually launch the app
 shinyApp(ui = ui, server = server)
