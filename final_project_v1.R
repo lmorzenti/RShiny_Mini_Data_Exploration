@@ -21,6 +21,29 @@ ui <- fluidPage(
       fileInput("counts_file", "Upload counts matrix",  accept = c(".csv", ".tsv", ".txt")),
       fileInput("DiffExp_file", "Upload DESeq2 results",  accept = c(".csv", ".tsv", ".txt")), 
       hr(),
+      
+      # only show on Counts tab
+      conditionalPanel(
+        condition = "input.tabs == 'Counts'",
+        sliderInput("variance_percentile", "Variance filter percentile",
+                    min = 0, max = 100, value = 50),
+        numericInput("min_nonzero", "Minimum nonzero samples", value = 3)
+      ),
+      
+      conditionalPanel(
+        condition = "input.tabs == 'Differential Expression'",
+        sliderInput("padj_slider", "Adjusted p-value cutoff (10^x)",
+                    min = -10, max = 0, value = -2)
+      ),
+      
+      conditionalPanel(
+        condition = "input.tabs == 'Individual Gene Expression'",
+        selectizeInput("gene_name", "Select gene", choices = NULL),
+        selectInput("plot_type", "Gene plot type",
+                    choices = c("boxplot", "violinplot", "beeswarm", "barplot")),
+        actionButton("plot_button", "Plot Gene")
+      ),
+      
       sliderInput("variance_percentile", "Variance filter percentile",
         min = 0, max = 100, value = 50),
       
@@ -30,14 +53,14 @@ ui <- fluidPage(
       sliderInput("padj_slider", "Adjusted p-value cutoff (10^x)",
         min = -10, max = 0, value = -2),
       
-      textInput("gene_name", "Gene to plot",
-        value = "HTT"),
+      selectizeInput("gene_name", "Select gene", choices = NULL),
       
       selectInput("plot_type", "Gene plot type",
         choices = c("boxplot", "violinplot", "beeswarm", "barplot"))
       ),
     mainPanel(
       tabsetPanel(
+        id = "tabs",
         tabPanel("Samples", 
                  tabsetPanel(
                    tabPanel("Summary", tableOutput("samples_table")),
@@ -56,9 +79,9 @@ ui <- fluidPage(
                    tabPanel("Table", tableOutput("differential_express_table")),
                    tabPanel("Volcano Plot", plotOutput("volcano_plot"))
                  )),
-        tabPanel("Individual Gene Expression", 
+        tabPanel("Individual Gene Expression",
                  tabsetPanel(
-                   tabPanel("Plot", plotOutput("individual_gene_plot"))
+                   tabPanel("Plot", tableOutput("individual_gene_plot"))
                  ))
       ),verbatimTextOutput("debug"))))
 
@@ -80,7 +103,7 @@ server <- function(input, output, session) {
   
   de_results <- reactive({
     req(input$DiffExp_file)
-    df <- read.delim(input$DiffExp_file$datapath, check.names=FALSE)
+    df <- read.csv(input$DiffExp_file$datapath, check.names=FALSE)
     return(df)
   })
   
@@ -282,6 +305,19 @@ server <- function(input, output, session) {
       return(gene_data)
     }
     
+    observe({
+      req(input$DiffExp_file)
+      de <- de_results()
+      de <- de[!is.na(de$symbol), ]
+      gene_choices <- setNames(
+        de$X,
+        de$symbol
+      )
+      updateSelectizeInput(session, "gene_name",
+                           choices = gene_choices,
+                           server = TRUE)
+    })
+    
     # plot the gene expression
     plot_individual_geneexpression <- function(gene_data, plot_type) {
       p <- ggplot(gene_data, aes(x = diagnosis, y = expression, fill = diagnosis)) +
@@ -367,16 +403,15 @@ server <- function(input, output, session) {
    
    #'  Individ. gene plot
    output$individual_gene_plot <- renderPlot({
+     req(input$DiffExp_file, input$counts_file, input$metadata_file)
+     req(input$gene_name != "")
      gene_data <- prepare_gene_data(counts(), metadata(), input$gene_name)
      plot_individual_geneexpression(gene_data, input$plot_type)
    })
    
    output$debug <- renderPrint({
-     req(input$counts_file)
-     cat("dimensions:", dim(counts()), "\n")
-     cat("NA count:", sum(is.na(counts())), "\n")
-     cat("first few colnames:", head(colnames(counts())), "\n")
-     cat("class of first data col:", class(counts()[,2]), "\n")
+     req(input$metadata_file)
+     cat("diagnosis values:", unique(metadata()$diagnosis), "\n")
    })
    
    
