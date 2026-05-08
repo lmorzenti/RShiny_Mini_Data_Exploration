@@ -42,22 +42,10 @@ ui <- fluidPage(
         selectInput("plot_type", "Gene plot type",
                     choices = c("boxplot", "violinplot", "beeswarm", "barplot")),
         actionButton("plot_button", "Plot Gene")
-      ),
+      )
+    ),
       
-      sliderInput("variance_percentile", "Variance filter percentile",
-        min = 0, max = 100, value = 50),
       
-      numericInput("min_nonzero", "Minimum nonzero samples",
-        value = 3),
-      
-      sliderInput("padj_slider", "Adjusted p-value cutoff (10^x)",
-        min = -10, max = 0, value = -2),
-      
-      selectizeInput("gene_name", "Select gene", choices = NULL),
-      
-      selectInput("plot_type", "Gene plot type",
-        choices = c("boxplot", "violinplot", "beeswarm", "barplot"))
-      ),
     mainPanel(
       tabsetPanel(
         id = "tabs",
@@ -81,9 +69,9 @@ ui <- fluidPage(
                  )),
         tabPanel("Individual Gene Expression",
                  tabsetPanel(
-                   tabPanel("Plot", tableOutput("individual_gene_plot"))
+                   tabPanel("Plot", plotOutput("individual_gene_plot"))
                  ))
-      ),verbatimTextOutput("debug"))))
+      ),)))
 
 
 server <- function(input, output, session) {
